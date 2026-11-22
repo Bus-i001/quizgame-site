@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrainBlitz</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f1ff; --ink:#1d1a4a; --card:#ffffff; --accent:#5b3df5; --muted:#5d5a85;
+  --head:'Bricolage Grotesque','Trebuchet MS',system-ui,sans-serif;
+  --body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#14122e; --ink:#f1efff; --card:#1f1c45; --accent:#8f7bff; --muted:#a9a6d6;}
+}
+:root[data-theme="dark"]{--bg:#14122e; --ink:#f1efff; --card:#1f1c45; --accent:#8f7bff; --muted:#a9a6d6;}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.45}
+main{max-width:640px;margin:0 auto;padding:20px 18px 48px}
+.logo{font-family:var(--head);font-weight:800;font-size:1.5rem;background:none;border:0;color:var(--ink);padding:0;cursor:pointer}
+.logo span{color:var(--accent)}
+.trail{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px;min-height:8px}
+.chip{font:inherit;font-size:.9rem;font-weight:700;border:2px solid var(--ink);background:var(--card);color:var(--ink);border-radius:999px;padding:4px 12px;cursor:pointer}
+h1{font-family:var(--head);font-weight:800;font-size:2.1rem;line-height:1.1;margin:20px 0 6px;letter-spacing:-.01em}
+.sub{margin:0 0 22px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.btn{font:inherit;font-weight:700;text-align:left;color:var(--ink);background:var(--card);border:2.5px solid var(--ink);border-radius:16px;padding:16px;box-shadow:4px 4px 0 var(--ink);cursor:pointer;transition:transform .08s,box-shadow .08s;min-height:56px}
+.btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--ink)}
+.btn:focus-visible,.chip:focus-visible,.logo:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.big{font-family:var(--head);font-size:1.5rem;min-height:110px;display:flex;align-items:flex-end;color:#1d1a4a}
+.list{display:flex;flex-direction:column;gap:12px}
+.list .btn{width:100%}
+.muted{color:var(--muted)}
+.empty{background:var(--card);border:2.5px dashed var(--ink);border-radius:16px;padding:20px}
+.empty strong{font-family:var(--head);font-size:1.25rem;display:block;margin-bottom:6px}
+.btn[disabled]{opacity:.55;cursor:not-allowed;box-shadow:none}
+@media (prefers-reduced-motion: reduce){.btn{transition:none}}
+</style>
+</head>
+<body>
+<main>
+  <button class="logo" id="home" aria-label="Start over">Brain<span>Blitz</span></button>
+  <div class="trail" id="trail"></div>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+  <div id="view" aria-live="polite"></div>
+</main>
+
+<script>
+// ===== Settings (safe to keep in a public app) =====
+const SUPABASE_URL = "https://iammwumchbgongqefjmq.supabase.co";
+const SUPABASE_KEY = "sb_publishable_Uya9iVHdJ4mx-fabXpNcAA_KbAXXLEV";
+
+const $ = s => document.querySelector(s);
+const state = { curriculum: null, level: null, subject: null };
+const TILE_COLORS = ['#ffc93c', '#27c9a0', '#ff8fa0', '#9ab8ff'];
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+async function api(path) {
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    headers: { apikey: SUPABASE_KEY }
+  });
+  if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+  return res.json();
+}
+
+function setHead(title, sub) {
+  $('#title').textContent = title;
+  $('#sub').textContent = sub;
+}
+
+function renderTrail() {
+  const t = $('#trail');
+  t.replaceChildren();
+  const steps = [
+    ['curriculum', state.curriculum],
+    ['level', state.level],
+    ['subject', state.subject]
+  ];
+  const order = ['curriculum', 'level', 'subject'];
+  steps.forEach(([key, val]) => {
+    if (!val) return;
+    const c = el('button', 'chip', val.name);
+    c.title = 'Change ' + key;
+    c.addEventListener('click', () => {
+      order.slice(order.indexOf(key)).forEach(k => state[k] = null);
+      show();
+    });
+    t.appendChild(c);
+  });
+}
+
+function optionList(items, onPick, cls) {
+  const wrap = el('div', cls);
+  items.forEach((it, i) => {
+    const b = el('button', 'btn' + (cls === 'grid' ? ' big' : ''), it.name);
+    if (cls === 'grid') b.style.background = TILE_COLORS[i % TILE_COLORS.length];
+    b.addEventListener('click', () => onPick(it));
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
+async function show() {
+  renderTrail();
+  const view = $('#view');
+  view.replaceChildren(el('p', 'muted', 'Loading…'));
+  try {
+    if (!state.curriculum) {
+      setHead('What do you study?', 'Pick your curriculum to find your work.');
+      const data = await api('curricula?select=id,name&order=id');
+      view.replaceChildren(optionList(data, c => { state.curriculum = c; show(); }, 'grid'));
+    } else if (!state.level) {
+      setHead('Pick your level', state.curriculum.name + ': choose your grade or stage.');
+      const data = await api('levels?select=id,name&curriculum_id=eq.' + state.curriculum.id + '&order=sort_order');
+      view.replaceChildren(optionList(data, l => { state.level = l; show(); }, 'grid'));
+    } else if (!state.subject) {
+      setHead('Pick a subject', state.level.name + ' · ' + state.curriculum.name);
+      const data = await api('subjects?select=id,name&order=name');
+      view.replaceChildren(optionList(data, s => { state.subject = s; show(); }, 'list'));
+    } else {
+      setHead(state.subject.name, state.level.name + ' · ' + state.curriculum.name);
+      const data = await api('topics?select=id,name&subject_id=eq.' + state.subject.id +
+        '&level_id=eq.' + state.level.id + '&order=name');
+      if (data.length) {
+        view.replaceChildren(optionList(data, t => alert('Quizzes for “' + t.name + '” are coming next.'), 'list'));
+      } else {
+        const box = el('div', 'empty');
+        box.append(
+          el('strong', '', 'No topics here yet'),
+          el('p', 'muted', 'Quizzes for this subject and level haven’t been added. Soon you’ll be able to create the first one.')
+        );
+        const b = el('button', 'btn', 'Create a quiz (coming soon)');
+        b.disabled = true;
+        box.appendChild(b);
+        view.replaceChildren(box);
+      }
+    }
+  } catch (err) {
+    const box = el('div', 'empty');
+    box.append(
+      el('strong', '', 'Couldn’t load this'),
+      el('p', 'muted', 'Check your internet connection and try again.')
+    );
+    const b = el('button', 'btn', 'Try again');
+    b.addEventListener('click', show);
+    box.appendChild(b);
+    view.replaceChildren(box);
+  }
+}
+
+$('#home').addEventListener('click', () => {
+  state.curriculum = state.level = state.subject = null;
+  show();
+});
+show();
+</script>
+</body>
+</html>
